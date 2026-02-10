@@ -14,14 +14,16 @@ async function setToken(res: Response, accessToken: string, refreshToken: string
     res.cookie("accessToken", accessToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+        path: "/",
         maxAge: 60 * 60 * 1000,
     });
 
     res.cookie("refreshToken", refreshToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
+        sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
+        path: "/",
         maxAge: 7 * 24 * 60 * 60,
     });
 }
@@ -43,6 +45,24 @@ export const register = async (req: Request, res: Response): Promise<void> => {
         const user = await prisma.user.create({
             data: { name, email, password: hashedPassword, role: "USER" },
         });
+
+        // 🔥 AUTO-LOGIN: token generate karo
+        const { accessToken, refreshToken } = generateToken(
+            user.id,
+            user.email,
+            user.role
+        );
+
+        // 🔥 Save refreshToken in DB
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { refreshToken },
+        });
+
+        // 🔥 cookies set karo (same as login)
+        await setToken(res, accessToken, refreshToken);
+
+
 
         res.status(201).json({
             success: true,
@@ -84,6 +104,11 @@ export const login = async (req: Request, res: Response): Promise<void> => {
             extractCurrentUser.email,
             extractCurrentUser.role
         );
+
+        await prisma.user.update({
+            where: { id: extractCurrentUser.id },
+            data: { refreshToken }, // 👈 save refresh token
+        });
 
         // set token in cookie
         await setToken(res, accessToken, refreshToken);
